@@ -6,6 +6,6 @@
 
 ```sh
 # make static
-# ls bin/
-ctr  oci-torrentd
+# ls bin
+oci-torrent-ctr  oci-torrentd
 ```

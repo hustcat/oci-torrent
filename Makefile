@@ -49,10 +49,10 @@ binary-local: client daemon
 binary-static-local: client-static daemon-static
 
 client:
-	cd cmd/ctr && go build -ldflags "${LDFLAGS}" -o ../../bin/ctr
+	cd cmd/ctr && go build -ldflags "${LDFLAGS}" -o ../../bin/oci-torrent-ctr
 
 client-static:
-	cd cmd/ctr && go build -ldflags "-w -extldflags -static ${LDFLAGS}" -tags "$(BUILDTAGS)" -o ../../bin/ctr
+	cd cmd/ctr && go build -ldflags "-w -extldflags -static ${LDFLAGS}" -tags "$(BUILDTAGS)" -o ../../bin/oci-torrent-ctr
 
 daemon:
 	cd cmd/daemon && go build -ldflags "${LDFLAGS}"  -tags "$(BUILDTAGS)"  -o ../../bin/oci-torrentd

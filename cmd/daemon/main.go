@@ -102,7 +102,7 @@ func setupDumpStacksTrap() {
 func main() {
 	logrus.SetFormatter(&logrus.TextFormatter{TimestampFormat: time.RFC3339Nano})
 	app := cli.NewApp()
-	app.Name = "oci-syncerd"
+	app.Name = "oci-torrent"
 	if version.GitCommit != "" {
 		app.Version = fmt.Sprintf("%s commit: %s", version.Version, version.GitCommit)
 	} else {

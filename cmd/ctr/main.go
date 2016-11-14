@@ -39,7 +39,7 @@ func main() {
 		}
 	}()
 	app := cli.NewApp()
-	app.Name = "ctr"
+	app.Name = "oci-torrent-ctr"
 	if version.GitCommit != "" {
 		app.Version = fmt.Sprintf("%s commit: %s", version.Version, version.GitCommit)
 	} else {
