@@ -23,6 +23,11 @@ import (
 	"github.com/hustcat/oci-torrent/bt"
 )
 
+const (
+	usernameKey = "username"
+	passwordKey = "password"
+)
+
 type Daemon struct {
 	config *Config
 	// bt
@@ -66,6 +71,11 @@ func NewDaemon(config *Config) (*Daemon, error) {
 }
 
 func (daemon *Daemon) StartDownload(ctx context.Context, r *types.StartDownloadRequest) (*types.StartDownloadResponse, error) {
+	if r.Username != "" && r.Password != "" {
+		context.WithValue(ctx, usernameKey, r.Username)
+		context.WithValue(ctx, passwordKey, r.Password)
+	}
+
 	if daemon.config.BtSeeder {
 		return daemon.startSeederDownload(ctx, r)
 	} else {
@@ -103,7 +113,7 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 	}
 
 	writeReport("Inspect %s\n", imageSource)
-	img, err := srcRef.NewImage(daemon.getSystemContextFromConfig())
+	img, err := srcRef.NewImage(daemon.getSystemContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("Error new image %v", err)
 	}
@@ -121,7 +131,7 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 		return nil, fmt.Errorf("Invalid destination name %s: %v", imageDest, err)
 	}
 
-	err = copy.Image(daemon.getSystemContextFromConfig(), policyContext, destRef, srcRef, daemon.getCopyOptions(fw))
+	err = copy.Image(daemon.getSystemContext(ctx), policyContext, destRef, srcRef, daemon.getCopyOptions(fw))
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +188,7 @@ func (daemon *Daemon) startSeedingLayer(ref imagetypes.ImageReference, digest st
 }
 
 func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDownloadRequest) (*types.StartDownloadResponse, error) {
-	sysCtx := daemon.getSystemContextFromConfig()
+	sysCtx := daemon.getSystemContext(ctx)
 
 	fw, err := os.OpenFile(r.Stdout, syscall.O_WRONLY, 0)
 	if err != nil {
@@ -330,7 +340,7 @@ func (daemon *Daemon) StopDownload(ctx context.Context, r *types.StopDownloadReq
 	}
 
 	log.Debugf("Stop oci image %s", ociSource)
-	layers, err := daemon.getImageLayers(ociSource)
+	layers, err := daemon.getImageLayers(ctx, ociSource)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +385,7 @@ func (daemon *Daemon) Status(ctx context.Context, r *types.StatusRequest) (*type
 	}
 
 	log.Debugf("Status oci image %s", ociSource)
-	layers, err := daemon.getImageLayers(ociSource)
+	layers, err := daemon.getImageLayers(ctx, ociSource)
 	if err != nil {
 		return nil, err
 	}
@@ -413,7 +423,7 @@ func (daemon *Daemon) GetTorrent(ctx context.Context, r *types.GetTorrentRequest
 	}, nil
 }
 
-func (daemon *Daemon) getImageLayers(image string) ([]string, error) {
+func (daemon *Daemon) getImageLayers(ctx context.Context, image string) ([]string, error) {
 	policyContext, err := daemon.getPolicyContext()
 	if err != nil {
 		return nil, fmt.Errorf("Error loading trust policy: %v", err)
@@ -425,7 +435,7 @@ func (daemon *Daemon) getImageLayers(image string) ([]string, error) {
 		return nil, fmt.Errorf("Invalid source name %s: %v", image, err)
 	}
 
-	img, err := srcRef.NewImage(daemon.getSystemContextFromConfig())
+	img, err := srcRef.NewImage(daemon.getSystemContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("Error new image %v", err)
 	}
@@ -465,13 +475,33 @@ func (daemon *Daemon) getPolicyContext() (*signature.PolicyContext, error) {
 	return signature.NewPolicyContext(policy)
 }
 
-func (daemon *Daemon) getSystemContextFromConfig() *imagetypes.SystemContext {
+func (daemon *Daemon) getSystemContext(ctx context.Context) (sysCtx *imagetypes.SystemContext) {
+	var (
+		username string
+		password string
+		ok       bool
+	)
+
 	// FIXME: get value from daemon.config
-	return &imagetypes.SystemContext{
+	sysCtx = &imagetypes.SystemContext{
 		RegistriesDirPath:           "",
 		DockerCertPath:              "",
 		DockerInsecureSkipTLSVerify: true,
 	}
+
+	if username, ok = ctx.Value(usernameKey).(string); !ok {
+		return
+	}
+	if password, ok = ctx.Value(passwordKey).(string); !ok {
+		return
+	}
+
+	auth := &imagetypes.DockerAuthConfig{
+		Username: username,
+		Password: password,
+	}
+	sysCtx.DockerAuthConfig = auth
+	return
 }
 
 func (daemon *Daemon) getCopyOptions(w io.Writer) *copy.Options {

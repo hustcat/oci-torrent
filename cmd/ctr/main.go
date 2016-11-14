@@ -101,6 +101,16 @@ var startDownloadCommand = cli.Command{
 			Name:  "quiet",
 			Usage: "not attach stdio",
 		},
+		cli.StringFlag{
+			Name:  "username",
+			Value: "",
+			Usage: "use `USERNAME` for accessing the registry",
+		},
+		cli.StringFlag{
+			Name:  "password",
+			Value: "",
+			Usage: "use `PASSWORD` for accessing the registry",
+		},
 	},
 	Action: func(context *cli.Context) {
 		var (
@@ -128,9 +138,11 @@ var startDownloadCommand = cli.Command{
 		}
 		c := getClient(context)
 		_, err = c.StartDownload(netcontext.Background(), &types.StartDownloadRequest{
-			Source: image,
-			Stdout: s.stdout,
-			Stderr: s.stderr,
+			Source:   image,
+			Stdout:   s.stdout,
+			Stderr:   s.stderr,
+			Username: context.String("username"),
+			Password: context.String("password"),
 		})
 		if err != nil {
 			fatal(err.Error(), 1)

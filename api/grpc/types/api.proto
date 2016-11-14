@@ -24,6 +24,8 @@ message StartDownloadRequest {
 	string source = 1;
 	string stdout = 2; // path to file where stdout will be written (optional)
 	string stderr = 3; // path to file where stderr will be written (optional)
+	string username = 4;
+	string password = 5;
 }
 
 message StartDownloadResponse {
