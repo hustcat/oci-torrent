@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package types;
+
+service API {
+	rpc GetServerVersion(GetServerVersionRequest) returns (GetServerVersionResponse) {}
+	rpc StartDownload(StartDownloadRequest) returns (StartDownloadResponse) {}
+	rpc StopDownload(StopDownloadRequest) returns (StopDownloadResponse) {}
+	rpc GetTorrent(GetTorrentRequest) returns (GetTorrentResponse) {}
+	rpc Status(StatusRequest) returns (StatusResponse){}
+}
+
+message GetServerVersionRequest {
+}
+
+message GetServerVersionResponse {
+	uint32 major = 1;
+	uint32 minor = 2;
+	uint32 patch = 3;
+	string revision = 4;
+}
+
+message StartDownloadRequest {
+	string source = 1;
+	string stdout = 2; // path to file where stdout will be written (optional)
+	string stderr = 3; // path to file where stderr will be written (optional)
+}
+
+message StartDownloadResponse {
+}
+
+message StopDownloadRequest {
+	string source = 1;
+}
+
+message StopDownloadResponse {
+	repeated string ids = 1;
+}
+
+message GetTorrentRequest {
+	string id = 1;
+}
+
+message GetTorrentResponse {
+	bytes torrent = 1;
+}
+
+message StatusRequest {
+	string source = 1;
+}
+
+message LayerDownState {
+	string id        = 1;
+	string state     = 2;
+	int64  completed = 3;
+	int64  size      = 4;
+	bool   seeding   = 5;
+}
+
+message StatusResponse {
+	repeated LayerDownState layerDownStates = 1;
+}
+
+
