@@ -350,9 +350,9 @@ func (daemon *Daemon) StopDownload(ctx context.Context, r *types.StopDownloadReq
 
 		if r.Clean {
 			if err = daemon.btEngine.DeleteTorrent(id); err != nil {
-				log.Errorf("Delete torrent %d error: %v", id, err)
+				log.Errorf("Delete torrent %s error: %v", id, err)
 			} else {
-				log.Infof("Delete torrent %d success", id)
+				log.Infof("Delete torrent %s success", id)
 			}
 		}
 	}
