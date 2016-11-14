@@ -60,6 +60,8 @@ func (t *Torrent) Update() {
 		}
 		t.Downloaded = bytes
 		t.updatedAt = now
+	} else {
+		t.Seeding = false
 	}
 }
 

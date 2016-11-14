@@ -143,11 +143,9 @@ var stopDownloadCommand = cli.Command{
 	Usage:     "stop download",
 	ArgsUsage: "IMAGE",
 	Flags: []cli.Flag{
-		// FIXME: remove it
-		cli.StringFlag{
-			Name:  "dummy",
-			Value: "",
-			Usage: "dummy usage",
+		cli.BoolFlag{
+			Name:  "no-clean",
+			Usage: "do not remove temporary layer file and torrent file if exist",
 		},
 	},
 	Action: func(context *cli.Context) {
@@ -162,6 +160,7 @@ var stopDownloadCommand = cli.Command{
 		c := getClient(context)
 		resp, err := c.StopDownload(netcontext.Background(), &types.StopDownloadRequest{
 			Source: image,
+			Clean:  !context.Bool("no-clean"),
 		})
 		if err != nil {
 			fatal(err.Error(), 1)

@@ -341,11 +341,19 @@ func (daemon *Daemon) StopDownload(ctx context.Context, r *types.StopDownloadReq
 		// Stop download layer file
 		if err = daemon.btEngine.StopTorrent(id); err != nil {
 			// FIXME: return failed layer info to client
-			log.Errorf("Stop download layer %s failed: %v", id, err)
+			log.Errorf("Stop torrent %s failed: %v", id, err)
 			return nil, err
 		} else {
-			log.Infof("Stop download layer %s success", id)
+			log.Infof("Stop torrent %s success", id)
 			ids = append(ids, id)
+		}
+
+		if r.Clean {
+			if err = daemon.btEngine.DeleteTorrent(id); err != nil {
+				log.Errorf("Delete torrent %d error: %v", id, err)
+			} else {
+				log.Infof("Delete torrent %d success", id)
+			}
 		}
 	}
 

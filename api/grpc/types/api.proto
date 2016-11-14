@@ -31,6 +31,7 @@ message StartDownloadResponse {
 
 message StopDownloadRequest {
 	string source = 1;
+	bool   clean  = 2;
 }
 
 message StopDownloadResponse {
