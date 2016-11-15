@@ -5,6 +5,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/hustcat/oci-torrent/utils"
+
 	pb "gopkg.in/cheggaaa/pb.v1"
 )
 
@@ -33,13 +35,11 @@ func (p *ProgressDownload) waitComplete(t *Torrent) {
 		p.bar.Set(int(completed))
 		time.Sleep(500 * time.Millisecond)
 	}
+	writeReport("\n")
 }
 
 func NewProgressDownload(id string, size int, output io.Writer) *ProgressDownload {
-	bar := pb.New(size)
-	bar.Output = output
-	bar.ShowTimeLeft = false
-	bar.ShowPercent = false
+	bar := utils.NewProgressBar(size, output)
 	return &ProgressDownload{
 		id:     id,
 		output: output,
