@@ -519,7 +519,9 @@ func (daemon *Daemon) buildOciDestFromReference(ref imagetypes.ImageReference) s
 		return ""
 	}
 
-	imageDest := "oci:" + repoDir
+	refTag := reference.WithDefaultTag(ref.DockerReference())
+	tag := refTag.(reference.NamedTagged).Tag()
+	imageDest := "oci:" + repoDir + ":" + tag
 	return imageDest
 }
 

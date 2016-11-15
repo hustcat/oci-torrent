@@ -29,8 +29,8 @@ func main() {
 		r = reference.WithDefaultTag(r)
 		fmt.Printf("Name(): %v\n", r.Name())         //busybox
 		fmt.Printf("Remote(): %v\n", r.RemoteName()) //library/busybox
-		fmt.Printf("String(): %v\n", r.String())     //busybox:v1
-		fmt.Printf("Tag(): %v\n", r.(reference.NamedTagged).Tag())
+		fmt.Printf("String(): %v\n", r.String())     //busybox:latest
+		fmt.Printf("Tag(): %v\n", r.(reference.NamedTagged).Tag()) //latest
 	}
 
 }
