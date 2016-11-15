@@ -21,6 +21,7 @@ import (
 
 var (
 	ErrBtEngineNotStart = fmt.Errorf("BT engine not started")
+	ErrIdNotExist       = fmt.Errorf("ID not exist")
 )
 
 const DefaultUploadRateLimit = 50 * 1024 * 1024 // 50Mb/s
@@ -205,7 +206,7 @@ func (e *BtEngine) GetStatus(id string) (*Status, error) {
 
 	info, ok := e.idInfos[id]
 	if !ok {
-		return nil, fmt.Errorf("Get status for %s not founded", id)
+		return nil, ErrIdNotExist
 	}
 
 	t, err := e.getTorrent(info.InfoHash)

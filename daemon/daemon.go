@@ -145,6 +145,7 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 
 		if ok {
 			// Layer exist, skip it
+			writeReport("%s exist, skip it\n", layer.Digest)
 			log.Infof("Layer %s exist, skip it", layer.Digest)
 			continue
 		}
@@ -303,6 +304,7 @@ func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDo
 
 		if ok {
 			// Layer exist, skip it
+			writeReport("%s exist, skip it\n", layer.Digest)
 			log.Infof("Layer %s exist, skip it", layer.Digest)
 			continue
 		}
@@ -420,14 +422,14 @@ func (daemon *Daemon) StopDownload(ctx context.Context, r *types.StopDownloadReq
 	}
 
 	log.Debugf("Stop oci image %s", ociSource)
-	layers, err := daemon.getImageLayers(ctx, ociSource)
+	layers, err := daemon.getOciImageLayers(ctx, ociSource)
 	if err != nil {
 		return nil, err
 	}
 
 	var ids []string
 	for _, layer := range layers {
-		id := distdigests.Digest(layer).Hex()
+		id := distdigests.Digest(layer.Digest).Hex()
 		// Stop download layer file
 		if err = daemon.btEngine.StopTorrent(id); err != nil {
 			// FIXME: return failed layer info to client
@@ -465,26 +467,37 @@ func (daemon *Daemon) Status(ctx context.Context, r *types.StatusRequest) (*type
 	}
 
 	log.Debugf("Status oci image %s", ociSource)
-	layers, err := daemon.getImageLayers(ctx, ociSource)
+	layers, err := daemon.getOciImageLayers(ctx, ociSource)
 	if err != nil {
 		return nil, err
 	}
 
 	var lss []*types.LayerDownState
 	for _, layer := range layers {
-		id := distdigests.Digest(layer).Hex()
+		var ls *types.LayerDownState
 
+		id := distdigests.Digest(layer.Digest).Hex()
 		s, err := daemon.btEngine.GetStatus(id)
 		if err != nil {
-			return nil, err
-		}
-
-		ls := &types.LayerDownState{
-			Id:        id,
-			State:     s.State,
-			Completed: s.Completed,
-			Size:      s.TotalLen,
-			Seeding:   s.Seeding,
+			if err != bt.ErrIdNotExist {
+				return nil, err
+			} else {
+				ls = &types.LayerDownState{
+					Id:        id,
+					State:     bt.Dropped.String(),
+					Completed: layer.Size,
+					Size:      layer.Size,
+					Seeding:   false,
+				}
+			}
+		} else {
+			ls = &types.LayerDownState{
+				Id:        id,
+				State:     s.State,
+				Completed: s.Completed,
+				Size:      s.TotalLen,
+				Seeding:   s.Seeding,
+			}
 		}
 		lss = append(lss, ls)
 	}
@@ -503,7 +516,7 @@ func (daemon *Daemon) GetTorrent(ctx context.Context, r *types.GetTorrentRequest
 	}, nil
 }
 
-func (daemon *Daemon) getImageLayers(ctx context.Context, image string) ([]string, error) {
+func (daemon *Daemon) getOciImageLayers(ctx context.Context, image string) ([]imagetypes.BlobInfo, error) {
 	policyContext, err := daemon.getPolicyContext()
 	if err != nil {
 		return nil, fmt.Errorf("Error loading trust policy: %v", err)
@@ -519,13 +532,7 @@ func (daemon *Daemon) getImageLayers(ctx context.Context, image string) ([]strin
 	if err != nil {
 		return nil, fmt.Errorf("Error new image %v", err)
 	}
-	imgInfo, err := img.Inspect()
-	if err != nil {
-		return nil, err
-	}
-	log.Debugf("ImageInfo: %v", imgInfo)
-
-	return imgInfo.Layers, nil
+	return img.LayerInfos(), nil
 }
 
 func (daemon *Daemon) getTorrentFromSeeder(id string) ([]byte, error) {
