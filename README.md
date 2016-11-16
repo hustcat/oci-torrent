@@ -1,6 +1,8 @@
-## oci-torrent - A tool to distribute oci image with bittorent
+## oci-torrent - A tool to distribute OCI image with bittorrent
 
-`oci-torrent` is a tool to distribute [OCI image](https://github.com/opencontainers/image-spec) with bittorent.
+`oci-torrent` is a tool to distribute [OCI image](https://github.com/opencontainers/image-spec) with [bittorrent](https://en.wikipedia.org/wiki/BitTorrent):
+
+![](/docs/pic/architecture.jpg)
 
 ## build
 
@@ -68,7 +70,8 @@ Start download image: docker://busybox
 56bec22e355981d8ba0878c6c2f23b21f422f30ab0aba188b54f1ffeff59c190: Get torrent data from seeder
 56bec22e355981d8ba0878c6c2f23b21f422f30ab0aba188b54f1ffeff59c190: Getting torrent info
 56bec22e355981d8ba0878c6c2f23b21f422f30ab0aba188b54f1ffeff59c190: Start bittorent downloading
- 262144 / 668151 [============================================>--------------------------------------------------------------------]56bec22e355981d8ba0878c6c2f23b21f422f30ab0aba188b54f1ffeff59c190: Copy to OCI directory
+ 262144 / 668151 [============================================>--------------------------------------------------------------------]
+56bec22e355981d8ba0878c6c2f23b21f422f30ab0aba188b54f1ffeff59c190: Copy to OCI directory
 Copying config sha256:e02e811dd08fd49e7f6032625495118e63f597eb150403d02e3238af1df240ba
 Writing manifest to image destination
 ```
@@ -104,3 +107,8 @@ ID                  STATE               COMPLETED           TOTALLEN            
 # oci-torrent-ctr stop busybox      
 Stopped: 56bec22e355981d8ba0878c6c2f23b21f422f30ab0aba188b54f1ffeff59c190
 ```
+
+## TODO
+
+* [Support OCI image layout in docker save/load](https://github.com/docker/docker/pull/26369)
+* Incremental load image
