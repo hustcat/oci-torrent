@@ -1,3 +1,5 @@
+.PHONY: all binary static bin clean binary-static binary-local binary-local-static client client-static daemon daemon-static install
+
 BUILDTAGS=
 
 PROJECT=github.com/hustcat/oci-torrent
@@ -34,7 +36,7 @@ bin:
 	mkdir -p bin/
 
 clean:
-	rm -rf bin && rm -rf output
+	rm -rf bin
 
 binary: bin
 	docker build ${DOCKER_BUILD_ARGS} -f Dockerfile.build -t ${DOCKER_IMAGE} .
