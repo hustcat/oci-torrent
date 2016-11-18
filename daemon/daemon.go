@@ -6,14 +6,12 @@ import (
 	"io"
 	"os"
 	"path"
-	"strings"
 	"syscall"
 
 	log "github.com/Sirupsen/logrus"
 	distdigests "github.com/docker/distribution/digest"
 	"golang.org/x/net/context"
 
-	"github.com/containers/image/copy"
 	"github.com/containers/image/docker/reference"
 	"github.com/containers/image/signature"
 	"github.com/containers/image/transports"
@@ -31,7 +29,7 @@ const (
 
 type Daemon struct {
 	config *Config
-	// bt
+	// BT engine
 	btEngine *bt.BtEngine
 }
 
@@ -118,28 +116,20 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 	layerInfos := img.LayerInfos()
 	log.Debugf("layerInfos: %v", layerInfos)
 
-	imageDest := daemon.buildOciDestFromReference(srcRef)
-	log.Debugf("Image destination: %s", imageDest)
-	destRef, err := transports.ParseImageName(imageDest)
-	if err != nil {
-		return nil, fmt.Errorf("Invalid destination name %s: %v", imageDest, err)
-	}
-
-	dest, err := destRef.NewImageDestination(sysCtx)
-	if err != nil {
-		return nil, fmt.Errorf("Error initializing destination %s: %v", transports.ImageName(destRef), err)
-	}
-	defer dest.Close()
-
-	destSupportedManifestMIMETypes := dest.SupportedManifestMIMETypes()
-	src, err := srcRef.NewImageSource(sysCtx, destSupportedManifestMIMETypes)
+	src, err := srcRef.NewImageSource(sysCtx, ociSupportedManifestMIMETypes())
 	if err != nil {
 		return nil, fmt.Errorf("Error initializing source %s: %v", transports.ImageName(srcRef), err)
 	}
 
+	ociImg, err := newOciImage(daemon, srcRef)
+	if err != nil {
+		return nil, err
+	}
+	defer ociImg.Close()
+
 	for _, layer := range layerInfos {
 		var ok bool
-		if ok, err = daemon.ociDestBlobExist(srcRef, layer.Digest); err != nil {
+		if ok, err = ociImg.layout.Exist(ctx, layer.Digest); err != nil {
 			return nil, fmt.Errorf("Error check OCI dest blob exist: %v", err)
 		}
 
@@ -151,7 +141,7 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 		}
 
 		writeReport("Copying layer %s\n", layer.Digest)
-		if err = daemon.copyLayer(dest, src, layer, fw); err != nil {
+		if err = daemon.copyLayer(ctx, ociImg, src, layer, fw); err != nil {
 			log.Errorf("Error copy layer %s: %v", layer.Digest, err)
 			return nil, err
 		} else {
@@ -159,7 +149,7 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 		}
 
 		log.Debugf("Start seeding layer %s", layer.Digest)
-		err = daemon.startSeedingLayer(srcRef, layer.Digest, writeReport)
+		err = daemon.startSeedingLayer(ctx, ociImg, layer.Digest, writeReport)
 		if err != nil {
 			return nil, err
 		}
@@ -168,7 +158,7 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 	return &types.StartDownloadResponse{}, nil
 }
 
-func (daemon *Daemon) copyLayer(dest imagetypes.ImageDestination, src imagetypes.ImageSource,
+func (daemon *Daemon) copyLayer(ctx context.Context, ociImg *OciImage, src imagetypes.ImageSource,
 	srcInfo imagetypes.BlobInfo, reportWriter io.Writer) error {
 	srcStream, _, err := src.GetBlob(srcInfo.Digest)
 	if err != nil {
@@ -182,41 +172,18 @@ func (daemon *Daemon) copyLayer(dest imagetypes.ImageDestination, src imagetypes
 	srcStream = bar.NewProxyReader(srcStream)
 	defer fmt.Fprint(reportWriter, "\n")
 
-	info, err := dest.PutBlob(srcStream, srcInfo)
+	digest, _, err := ociImg.layout.PutBlob(ctx, srcStream)
 	if err != nil {
 		return fmt.Errorf("Error writing blob: %v", err)
 	}
 
-	// OCI destination will verify digest
-	if info.Digest != srcInfo.Digest {
-		return fmt.Errorf("Digest not match, src: %s, dest: %s", srcInfo.Digest, info.Digest)
+	if digest != srcInfo.Digest {
+		return fmt.Errorf("Digest not match, src: %s, dest: %s", srcInfo.Digest, digest)
 	}
 	return nil
 }
 
-func (daemon *Daemon) ociDestBlobExist(ref imagetypes.ImageReference, digest string) (bool, error) {
-	// FIXME: OCI destination should add API for support this
-	pts := strings.SplitN(digest, ":", 2)
-	if len(pts) != 2 {
-		return false, fmt.Errorf("Invalid digest: %s", digest)
-	}
-
-	rootDir := daemon.ociRootDir()
-	repoDir := path.Join(rootDir, ref.DockerReference().RemoteName())
-
-	dest := path.Join(repoDir, "blobs", pts[0], pts[1])
-
-	if _, err := os.Stat(dest); err != nil {
-		if !os.IsNotExist(err) {
-			return false, err
-		} else {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-func (daemon *Daemon) startSeedingLayer(ref imagetypes.ImageReference, digest string, writeReport func(f string, a ...interface{})) error {
+func (daemon *Daemon) startSeedingLayer(ctx context.Context, ociImg *OciImage, digest string, writeReport func(f string, a ...interface{})) error {
 	id := distdigests.Digest(digest).Hex()
 	// Write layer to file
 	fn := daemon.btEngine.GetFilePath(id)
@@ -227,13 +194,7 @@ func (daemon *Daemon) startSeedingLayer(ref imagetypes.ImageReference, digest st
 	defer layerFile.Close()
 
 	// Copy from OCI directory
-	srcPath, err := daemon.buildOciLayerPathFromReference(ref, digest)
-	if err != nil {
-		log.Errorf("Build oci layer directory error: %v", err)
-		return err
-	}
-
-	srcFile, err := os.Open(srcPath)
+	srcFile, err := ociImg.layout.GetBlob(ctx, digest)
 	if err != nil {
 		return fmt.Errorf("Open oci layer %s error: %v", digest, err)
 	}
@@ -295,10 +256,16 @@ func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDo
 	layerInfos := img.LayerInfos()
 	log.Debugf("layerInfos: %v", layerInfos)
 
+	ociImg, err := newOciImage(daemon, srcRef)
+	if err != nil {
+		return nil, err
+	}
+	defer ociImg.Close()
+
 	writeReport("Start download image: %s\n", imageSource)
 	for _, layer := range layerInfos {
 		var ok bool
-		if ok, err = daemon.ociDestBlobExist(srcRef, layer.Digest); err != nil {
+		if ok, err = ociImg.layout.Exist(ctx, layer.Digest); err != nil {
 			return nil, fmt.Errorf("Error check OCI dest blob exist: %v", err)
 		}
 
@@ -309,22 +276,11 @@ func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDo
 			continue
 		}
 
-		err = daemon.startLeechingLayer(srcRef, layer, writeReport, fw)
+		err = daemon.startLeechingLayer(ctx, ociImg, srcRef, layer, writeReport, fw)
 		if err != nil {
 			// FIXME: download from image source
 			return nil, err
 		}
-	}
-
-	imageDest := daemon.buildOciDestFromReference(srcRef)
-	log.Debugf("Image destination: %s", imageDest)
-	destRef, err := transports.ParseImageName(imageDest)
-	if err != nil {
-		return nil, fmt.Errorf("Invalid destination name %s: %v", imageDest, err)
-	}
-	dest, err := destRef.NewImageDestination(sysCtx)
-	if err != nil {
-		return nil, fmt.Errorf("Error initializing destination %s: %v", imageDest, err)
 	}
 
 	// Pull image config
@@ -336,13 +292,13 @@ func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDo
 			return nil, err
 		}
 
-		destInfo, err := dest.PutBlob(bytes.NewReader(configBlob), srcInfo)
+		digest, _, err := ociImg.layout.PutBlob(ctx, bytes.NewReader(configBlob))
 		if err != nil {
 			return nil, err
 		}
 
-		if destInfo.Digest != srcInfo.Digest {
-			return nil, fmt.Errorf("Error config blob %s changed to %s", srcInfo.Digest, destInfo.Digest)
+		if digest != srcInfo.Digest {
+			return nil, fmt.Errorf("Error config blob %s changed to %s", srcInfo.Digest, digest)
 		}
 	} else {
 		log.Infof("Config of %s is empty", imageSource)
@@ -355,14 +311,14 @@ func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDo
 	}
 
 	writeReport("Writing manifest to image destination\n")
-	if err = dest.PutManifest(manifest); err != nil {
+	if err = daemon.putManifest(ctx, ociImg, manifest); err != nil {
 		return nil, fmt.Errorf("Error writing manifest: %v", err)
 	}
 
 	return &types.StartDownloadResponse{}, nil
 }
 
-func (daemon *Daemon) startLeechingLayer(ref imagetypes.ImageReference, layer imagetypes.BlobInfo, writeReport func(f string, a ...interface{}), fw io.Writer) error {
+func (daemon *Daemon) startLeechingLayer(ctx context.Context, ociImg *OciImage, ref imagetypes.ImageReference, layer imagetypes.BlobInfo, writeReport func(f string, a ...interface{}), fw io.Writer) error {
 	id := distdigests.Digest(layer.Digest).Hex()
 
 	log.Debugf("Start leeching layer %s", id)
@@ -392,19 +348,13 @@ func (daemon *Daemon) startLeechingLayer(ref imagetypes.ImageReference, layer im
 	}
 	defer layerFile.Close()
 
-	dstPath, err := daemon.buildOciLayerPathFromReference(ref, layer.Digest)
+	digest, _, err := ociImg.layout.PutBlob(ctx, layerFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("Error to put blob %s: %v", layer.Digest, err)
 	}
-	dstFile, err := os.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("Create OCI layer %s error: %v", layer.Digest, err)
-	}
-	defer dstFile.Close()
 
-	_, err = io.Copy(dstFile, layerFile)
-	if err != nil {
-		return fmt.Errorf("Copy OCI layer %s error: %v", layer.Digest, err)
+	if digest != layer.Digest {
+		return fmt.Errorf("Digest not match, src: %s, dest: %s", layer.Digest, digest)
 	}
 	return nil
 }
@@ -415,21 +365,26 @@ func (daemon *Daemon) StopDownload(ctx context.Context, r *types.StopDownloadReq
 		return nil, fmt.Errorf("Image source cannot be empty")
 	}
 
-	ociSource, err := daemon.buildOciImageSource(imageSource)
+	ref, err := daemon.buildNamedTagged(imageSource)
 	if err != nil {
-		log.Errorf("Build oci image source error: %v", err)
 		return nil, err
 	}
 
-	log.Debugf("Stop oci image %s", ociSource)
-	layers, err := daemon.getOciImageLayers(ctx, ociSource)
+	ociImg, err := newOciImageSimple(daemon, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer ociImg.Close()
+
+	log.Debugf("Stop oci image %s", imageSource)
+	layers, err := daemon.getOciImageLayers(ctx, ociImg)
 	if err != nil {
 		return nil, err
 	}
 
 	var ids []string
 	for _, layer := range layers {
-		id := distdigests.Digest(layer.Digest).Hex()
+		id := distdigests.Digest(layer.digest).Hex()
 		// Stop download layer file
 		if err = daemon.btEngine.StopTorrent(id); err != nil {
 			// FIXME: return failed layer info to client
@@ -460,14 +415,19 @@ func (daemon *Daemon) Status(ctx context.Context, r *types.StatusRequest) (*type
 		return nil, fmt.Errorf("Image source cannot be empty")
 	}
 
-	ociSource, err := daemon.buildOciImageSource(imageSource)
+	ref, err := daemon.buildNamedTagged(imageSource)
 	if err != nil {
-		log.Errorf("Build oci image source error: %v", err)
 		return nil, err
 	}
 
-	log.Debugf("Status oci image %s", ociSource)
-	layers, err := daemon.getOciImageLayers(ctx, ociSource)
+	ociImg, err := newOciImageSimple(daemon, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer ociImg.Close()
+
+	log.Debugf("Status oci image %s", imageSource)
+	layers, err := daemon.getOciImageLayers(ctx, ociImg)
 	if err != nil {
 		return nil, err
 	}
@@ -476,7 +436,7 @@ func (daemon *Daemon) Status(ctx context.Context, r *types.StatusRequest) (*type
 	for _, layer := range layers {
 		var ls *types.LayerDownState
 
-		id := distdigests.Digest(layer.Digest).Hex()
+		id := distdigests.Digest(layer.digest).Hex()
 		s, err := daemon.btEngine.GetStatus(id)
 		if err != nil {
 			if err != bt.ErrIdNotExist {
@@ -485,8 +445,8 @@ func (daemon *Daemon) Status(ctx context.Context, r *types.StatusRequest) (*type
 				ls = &types.LayerDownState{
 					Id:        id,
 					State:     bt.Dropped.String(),
-					Completed: layer.Size,
-					Size:      layer.Size,
+					Completed: layer.size,
+					Size:      layer.size,
 					Seeding:   false,
 				}
 			}
@@ -514,25 +474,6 @@ func (daemon *Daemon) GetTorrent(ctx context.Context, r *types.GetTorrentRequest
 	return &types.GetTorrentResponse{
 		Torrent: t,
 	}, nil
-}
-
-func (daemon *Daemon) getOciImageLayers(ctx context.Context, image string) ([]imagetypes.BlobInfo, error) {
-	policyContext, err := daemon.getPolicyContext()
-	if err != nil {
-		return nil, fmt.Errorf("Error loading trust policy: %v", err)
-	}
-	defer policyContext.Destroy()
-
-	srcRef, err := transports.ParseImageName(image)
-	if err != nil {
-		return nil, fmt.Errorf("Invalid source name %s: %v", image, err)
-	}
-
-	img, err := srcRef.NewImage(daemon.getSystemContext(ctx))
-	if err != nil {
-		return nil, fmt.Errorf("Error new image %v", err)
-	}
-	return img.LayerInfos(), nil
 }
 
 func (daemon *Daemon) getTorrentFromSeeder(id string) ([]byte, error) {
@@ -591,65 +532,14 @@ func (daemon *Daemon) getSystemContext(ctx context.Context) (sysCtx *imagetypes.
 	return
 }
 
-func (daemon *Daemon) getCopyOptions(w io.Writer) *copy.Options {
-	return &copy.Options{
-		RemoveSignatures: false,
-		SignBy:           "",
-		ReportWriter:     w,
-	}
-}
-
-func (daemon *Daemon) buildOciDestFromReference(ref imagetypes.ImageReference) string {
-	rootDir := daemon.ociRootDir()
-	repoDir := path.Join(rootDir, ref.DockerReference().RemoteName())
-	if err := os.MkdirAll(repoDir, 0700); err != nil && !os.IsExist(err) {
-		return ""
-	}
-
-	refTag := reference.WithDefaultTag(ref.DockerReference())
-	tag := refTag.(reference.NamedTagged).Tag()
-	imageDest := "oci:" + repoDir + ":" + tag
-	return imageDest
-}
-
-func (daemon *Daemon) buildOciImageSource(source string) (string, error) {
-	rootDir := daemon.ociRootDir()
-	name, err := reference.ParseNamed(source)
+func (daemon *Daemon) buildNamedTagged(source string) (reference.Named, error) {
+	n, err := reference.ParseNamed(source)
 	if err != nil {
-		return "", err
+		return nil, err
+	} else {
+		nt := reference.WithDefaultTag(n)
+		return nt, nil
 	}
-
-	repoDir := path.Join(rootDir, name.RemoteName())
-	if _, err := os.Stat(repoDir); err != nil {
-		return "", err
-	}
-
-	nameTag := reference.WithDefaultTag(name)
-	tag := nameTag.(reference.NamedTagged).Tag()
-	imageSource := "oci:" + repoDir + ":" + tag
-	return imageSource, nil
-}
-
-func (daemon *Daemon) buildOciLayerPathFromReference(ref imagetypes.ImageReference, digest string) (string, error) {
-	pts := strings.SplitN(digest, ":", 2)
-	if len(pts) != 2 {
-		return "", fmt.Errorf("Invalid digest: %s", digest)
-	}
-
-	rootDir := daemon.ociRootDir()
-	repoDir := path.Join(rootDir, ref.DockerReference().RemoteName())
-
-	layerDir := path.Join(repoDir, "blobs", pts[0])
-	if err := os.MkdirAll(layerDir, 0700); err != nil && !os.IsExist(err) {
-		return "", err
-	}
-
-	dest := path.Join(repoDir, "blobs", pts[0], pts[1])
-	return dest, nil
-}
-
-func (daemon *Daemon) ociRootDir() string {
-	return path.Join(daemon.config.Root, "oci")
 }
 
 func (daemon *Daemon) btRootDir() string {
