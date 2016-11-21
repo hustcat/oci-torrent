@@ -137,17 +137,7 @@ func (daemon *Daemon) putManifest(ctx context.Context, ociImg *OciImage, raw []b
 	if err != nil {
 		return err
 	}
-	desc := &imgspecv1.Descriptor{}
-	desc.Digest = digest
-	// TODO: beaware and add support for OCI manifest list
-	desc.MediaType = mt
-	desc.Size = int64(len(ociMan))
-	data, err := json.Marshal(desc)
-	if err != nil {
-		return err
-	}
-
-	d, _, err := ociImg.layout.PutBlob(ctx, bytes.NewReader(data))
+	d, _, err := ociImg.layout.PutBlob(ctx, bytes.NewReader(ociMan))
 	if err != nil {
 		return err
 	}
@@ -156,9 +146,15 @@ func (daemon *Daemon) putManifest(ctx context.Context, ociImg *OciImage, raw []b
 	}
 
 	// Write reference
+	desc := &imgspecv1.Descriptor{}
+	desc.Digest = digest
+	// TODO: beaware and add support for OCI manifest list
+	desc.MediaType = mt
+	desc.Size = int64(len(ociMan))
 	if err = ociImg.layout.PutReference(ctx, ociImg.ref, desc); err != nil {
 		return err
 	}
+
 	return nil
 }
 

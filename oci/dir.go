@@ -39,12 +39,17 @@ func (e dirLayout) initialize() error {
 	path := e.path
 	dir := filepath.Dir(path)
 	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0755); err != nil && !os.IsExist(err) {
 			return err
 		}
 	}
-	if err := os.Mkdir(path, 0755); err != nil {
+	if err := os.Mkdir(path, 0755); err != nil && !os.IsExist(err) {
 		return err
+	}
+
+	// layout file exist, return
+	if _, err := os.Stat(filepath.Join(path, layoutFile)); err == nil {
+		return nil
 	}
 
 	// Create the necessary directories and "oci-layout" file.
