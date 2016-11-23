@@ -51,7 +51,7 @@ type idInfo struct {
 	Count    int
 }
 
-//the Engine Cloud Torrent engine, backed by anacrolix/torrent
+// BtEngine backed by anacrolix/torrent
 type BtEngine struct {
 	mut sync.Mutex
 
@@ -128,29 +128,30 @@ func (e *BtEngine) Run() error {
 	// for StartSeed
 	e.started = true
 
-	if files, err := ioutil.ReadDir(e.dataDir); err == nil {
-		for _, f := range files {
-			if filepath.Ext(f.Name()) != ".layer" {
-				continue
-			}
-			ss := strings.Split(f.Name(), ".")
-			if len(ss) != 2 {
-				log.Errorf("Found invalid layer file %s", f.Name())
-				continue
-			}
-
-			id := ss[0]
-			tf := e.GetTorrentFilePath(id)
-			if _, err = os.Lstat(tf); err != nil {
-				continue
-			}
-
-			if err = e.StartSeed(id); err != nil {
-				log.Errorf("Start seed %s failed: %v", id, err)
-			}
-		}
-	} else {
+	files, err := ioutil.ReadDir(e.dataDir)
+	if err != nil {
 		return err
+	}
+
+	for _, f := range files {
+		if filepath.Ext(f.Name()) != ".layer" {
+			continue
+		}
+		ss := strings.Split(f.Name(), ".")
+		if len(ss) != 2 {
+			log.Errorf("Found invalid layer file %s", f.Name())
+			continue
+		}
+
+		id := ss[0]
+		tf := e.GetTorrentFilePath(id)
+		if _, err = os.Lstat(tf); err != nil {
+			continue
+		}
+
+		if err = e.StartSeed(id); err != nil {
+			log.Errorf("Start seed %s failed: %v", id, err)
+		}
 	}
 
 	return nil
@@ -297,7 +298,8 @@ func (e *BtEngine) StartSeed(id string) error {
 
 	tf := e.GetTorrentFilePath(id)
 	if _, err := os.Lstat(tf); err != nil {
-		// Torrent file no exist, create it
+		// Torrent file not exist, create it
+		log.Debugf("Create torrent file for %s", id)
 		if err = e.createTorrent(id); err != nil {
 			return err
 		}
@@ -318,9 +320,9 @@ func (e *BtEngine) StartSeed(id string) error {
 		<-t.tt.GotInfo()
 		err = e.startTorrent(t.InfoHash)
 		if err != nil {
-			log.Errorf("start torrent %v failed: %v", t.InfoHash, err)
+			log.Errorf("Start torrent %v failed: %v", t.InfoHash, err)
 		} else {
-			log.Infof("start torrent %v success", t.InfoHash)
+			log.Infof("Start torrent %v success", t.InfoHash)
 		}
 	}()
 

@@ -75,29 +75,36 @@ func (daemon *Daemon) StartDownload(ctx context.Context, r *types.StartDownloadR
 		context.WithValue(ctx, passwordKey, r.Password)
 	}
 
+	var (
+		reportWriter io.WriteCloser
+		err          error
+	)
+	if r.Stdout != "" {
+		reportWriter, err = os.OpenFile(r.Stdout, syscall.O_WRONLY, 0)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			reportWriter.Close()
+		}()
+	}
+	writeReport := func(f string, a ...interface{}) {
+		if reportWriter != nil {
+			fmt.Fprintf(reportWriter, f, a...)
+		}
+	}
+
 	if daemon.config.BtSeeder {
-		return daemon.startSeederDownload(ctx, r)
+		return daemon.startSeederDownload(ctx, r.Source, reportWriter, writeReport)
 	} else {
-		return daemon.startLeecherDownload(ctx, r)
+		return daemon.startLeecherDownload(ctx, r.Source, reportWriter, writeReport)
 	}
 }
 
-func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDownloadRequest) (*types.StartDownloadResponse, error) {
+func (daemon *Daemon) startSeederDownload(ctx context.Context, source string, reportWriter io.Writer, writeReport func(f string, a ...interface{})) (*types.StartDownloadResponse, error) {
 	sysCtx := daemon.getSystemContext(ctx)
 
-	fw, err := os.OpenFile(r.Stdout, syscall.O_WRONLY, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		fw.Close()
-	}()
-
-	writeReport := func(f string, a ...interface{}) {
-		fmt.Fprintf(fw, f, a...)
-	}
-
-	imageSource := r.Source
+	imageSource := source
 	if imageSource == "" {
 		return nil, fmt.Errorf("Image source can't be nil")
 	}
@@ -141,7 +148,7 @@ func (daemon *Daemon) startSeederDownload(ctx context.Context, r *types.StartDow
 		}
 
 		writeReport("Copying layer %s\n", layer.Digest)
-		if err = daemon.copyLayer(ctx, ociImg, src, layer, fw); err != nil {
+		if err = daemon.copyLayer(ctx, ociImg, src, layer, reportWriter); err != nil {
 			log.Errorf("Error copy layer %s: %v", layer.Digest, err)
 			return nil, err
 		} else {
@@ -166,11 +173,13 @@ func (daemon *Daemon) copyLayer(ctx context.Context, ociImg *OciImage, src image
 	}
 	defer srcStream.Close()
 
-	bar := utils.NewProgressBar(int(srcInfo.Size), reportWriter)
-	bar.Start()
+	if reportWriter != nil {
+		bar := utils.NewProgressBar(int(srcInfo.Size), reportWriter)
+		bar.Start()
 
-	srcStream = bar.NewProxyReader(srcStream)
-	defer fmt.Fprint(reportWriter, "\n")
+		srcStream = bar.NewProxyReader(srcStream)
+		defer fmt.Fprint(reportWriter, "\n")
+	}
 
 	digest, _, err := ociImg.layout.PutBlob(ctx, srcStream)
 	if err != nil {
@@ -217,31 +226,13 @@ func (daemon *Daemon) startSeedingLayer(ctx context.Context, ociImg *OciImage, d
 	return nil
 }
 
-func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDownloadRequest) (*types.StartDownloadResponse, error) {
+func (daemon *Daemon) startLeecherDownload(ctx context.Context, source string, reportWriter io.Writer, writeReport func(f string, a ...interface{})) (*types.StartDownloadResponse, error) {
 	sysCtx := daemon.getSystemContext(ctx)
 
-	fw, err := os.OpenFile(r.Stdout, syscall.O_WRONLY, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		fw.Close()
-	}()
-
-	writeReport := func(f string, a ...interface{}) {
-		fmt.Fprintf(fw, f, a...)
-	}
-
-	imageSource := r.Source
+	imageSource := source
 	if imageSource == "" {
 		return nil, fmt.Errorf("Image source cannot be empty")
 	}
-
-	policyContext, err := daemon.getPolicyContext()
-	if err != nil {
-		return nil, fmt.Errorf("Error loading trust policy: %v", err)
-	}
-	defer policyContext.Destroy()
 
 	srcRef, err := transports.ParseImageName(imageSource)
 	if err != nil {
@@ -276,7 +267,7 @@ func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDo
 			continue
 		}
 
-		err = daemon.startLeechingLayer(ctx, ociImg, srcRef, layer, writeReport, fw)
+		err = daemon.startLeechingLayer(ctx, ociImg, srcRef, layer, writeReport, reportWriter)
 		if err != nil {
 			// FIXME: download from image source
 			return nil, err
@@ -318,7 +309,7 @@ func (daemon *Daemon) startLeecherDownload(ctx context.Context, r *types.StartDo
 	return &types.StartDownloadResponse{}, nil
 }
 
-func (daemon *Daemon) startLeechingLayer(ctx context.Context, ociImg *OciImage, ref imagetypes.ImageReference, layer imagetypes.BlobInfo, writeReport func(f string, a ...interface{}), fw io.Writer) error {
+func (daemon *Daemon) startLeechingLayer(ctx context.Context, ociImg *OciImage, ref imagetypes.ImageReference, layer imagetypes.BlobInfo, writeReport func(f string, a ...interface{}), reportWriter io.Writer) error {
 	id := distdigests.Digest(layer.Digest).Hex()
 
 	log.Debugf("Start leeching layer %s", id)
@@ -329,7 +320,10 @@ func (daemon *Daemon) startLeechingLayer(ctx context.Context, ociImg *OciImage, 
 		return err
 	}
 
-	progress := bt.NewProgressDownload(id, int(layer.Size), fw)
+	var progress *bt.ProgressDownload
+	if reportWriter != nil {
+		progress = bt.NewProgressDownload(id, int(layer.Size), reportWriter)
+	}
 	// Download layer file
 	if err := daemon.btEngine.StartLeecher(id, t, progress); err != nil {
 		log.Errorf("Download layer %s failed: %v", id, err)
