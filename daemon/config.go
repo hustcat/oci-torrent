@@ -8,6 +8,7 @@ type Config struct {
 	Pidfile     string
 	Root        string
 	ConnTimeout time.Duration
+	UseHardlink bool
 
 	BtEnable          bool
 	BtSeeder          bool

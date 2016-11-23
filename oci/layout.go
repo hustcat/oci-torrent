@@ -87,6 +87,9 @@ type Layout interface {
 	// Close releases all references held by the engine. Subsequent operations
 	// may fail.
 	Close() (err error)
+
+	// GetBlobPath returns a path of a blob from the image
+	GetBlobPath(ctx context.Context, digest string) (path string, err error)
 }
 
 // Open will create an Layout reference to the OCI image at the provided

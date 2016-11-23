@@ -196,27 +196,37 @@ func (daemon *Daemon) startSeedingLayer(ctx context.Context, ociImg *OciImage, d
 	id := distdigests.Digest(digest).Hex()
 	// Write layer to file
 	fn := daemon.btEngine.GetFilePath(id)
-	layerFile, err := os.Create(fn)
-	if err != nil {
-		return fmt.Errorf("Create layer file %s failed: %v", fn, err)
-	}
-	defer layerFile.Close()
+	if daemon.config.UseHardlink {
+		src, err := ociImg.layout.GetBlobPath(ctx, digest)
+		if err != nil {
+			return fmt.Errorf("Get oci blob path error: %v", err)
+		}
+		if err = os.Link(src, fn); err != nil {
+			return fmt.Errorf("Create hardlink error: %v", err)
+		}
+	} else {
+		layerFile, err := os.Create(fn)
+		if err != nil {
+			return fmt.Errorf("Create layer file %s failed: %v", fn, err)
+		}
+		defer layerFile.Close()
 
-	// Copy from OCI directory
-	srcFile, err := ociImg.layout.GetBlob(ctx, digest)
-	if err != nil {
-		return fmt.Errorf("Open oci layer %s error: %v", digest, err)
-	}
-	defer srcFile.Close()
+		// Copy from OCI directory
+		srcFile, err := ociImg.layout.GetBlob(ctx, digest)
+		if err != nil {
+			return fmt.Errorf("Open oci layer %s error: %v", digest, err)
+		}
+		defer srcFile.Close()
 
-	_, err = io.Copy(layerFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("Copy oci layer %s error: %v", digest, err)
+		_, err = io.Copy(layerFile, srcFile)
+		if err != nil {
+			return fmt.Errorf("Copy oci layer %s error: %v", digest, err)
+		}
 	}
 
 	writeReport("Start seeding %s\n", id)
 	// Seed layer file
-	if err = daemon.btEngine.StartSeed(id); err != nil {
+	if err := daemon.btEngine.StartSeed(id); err != nil {
 		log.Errorf("Seed layer %s failed: %v", id, err)
 	} else {
 		log.Infof("Seed layer %s success", id)
@@ -336,19 +346,29 @@ func (daemon *Daemon) startLeechingLayer(ctx context.Context, ociImg *OciImage, 
 	writeReport("%s: Copy to OCI directory\n", id)
 
 	fn := daemon.btEngine.GetFilePath(id)
-	layerFile, err := os.Open(fn)
-	if err != nil {
-		return fmt.Errorf("Open layer file %s failed: %v", fn, err)
-	}
-	defer layerFile.Close()
+	if daemon.config.UseHardlink {
+		dst, err := ociImg.layout.GetBlobPath(ctx, layer.Digest)
+		if err != nil {
+			return fmt.Errorf("Get oci blob path error: %v", err)
+		}
+		if err = os.Link(fn, dst); err != nil {
+			return fmt.Errorf("Create hardlink error: %v", err)
+		}
+	} else {
+		layerFile, err := os.Open(fn)
+		if err != nil {
+			return fmt.Errorf("Open layer file %s failed: %v", fn, err)
+		}
+		defer layerFile.Close()
 
-	digest, _, err := ociImg.layout.PutBlob(ctx, layerFile)
-	if err != nil {
-		return fmt.Errorf("Error to put blob %s: %v", layer.Digest, err)
-	}
+		digest, _, err := ociImg.layout.PutBlob(ctx, layerFile)
+		if err != nil {
+			return fmt.Errorf("Error to put blob %s: %v", layer.Digest, err)
+		}
 
-	if digest != layer.Digest {
-		return fmt.Errorf("Digest not match, src: %s, dest: %s", layer.Digest, digest)
+		if digest != layer.Digest {
+			return fmt.Errorf("Digest not match, src: %s, dest: %s", layer.Digest, digest)
+		}
 	}
 	return nil
 }

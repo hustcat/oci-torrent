@@ -71,6 +71,10 @@ var daemonFlags = []cli.Flag{
 		Value: 1 * time.Second,
 		Usage: "GRPC connection timeout",
 	},
+	cli.BoolFlag{
+		Name:  "hardlink",
+		Usage: "use hard link to copy layer between oci engine and bt engine",
+	},
 }
 
 // DumpStacks dumps the runtime stack.
@@ -138,6 +142,7 @@ func runDaemon(context *cli.Context) error {
 		BtSeederServer:    context.StringSlice("seeder-addr"),
 		UploadRateLimit:   context.Int("upload-rate"),
 		DownloadRateLimit: context.Int("download-rate"),
+		UseHardlink:       context.Bool("hardlink"),
 	}
 	s := make(chan os.Signal, 2048)
 	signal.Notify(s, syscall.SIGTERM, syscall.SIGINT)

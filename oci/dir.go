@@ -297,6 +297,14 @@ func (e dirLayout) Close() error {
 	return os.RemoveAll(e.temp)
 }
 
+func (e dirLayout) GetBlobPath(ctx context.Context, digest string) (path string, err error) {
+	path, err = blobPath(digest)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(e.path, path), nil
+}
+
 func newDirLayout(path string) (*dirLayout, error) {
 	layout := &dirLayout{
 		path: path,
